@@ -104,3 +104,23 @@ ItemCount:u8
 5. 实机验证火焰命中判定方，及 `0x0FA7` 各字段与发送者授权关系。
 
 所有实验需要保留抓包、解析日志和对应代码/客户端逆向地址，避免把服务端重建假设写成原版事实。
+
+## 6. 补充核实：客户端请求与下行通知不是同一 schema
+
+[game_event.go](../internal/protocol/game/game_event.go) 的 `peerNotifySchema` 明确将客户端放泡请求 `PLAYER_USE_BOMB = 0x0FA3` 映射为给其他客户端的 **`NOTIFY_PLAYER_USE_BOMB = 0x138B`**。两者正文布局相同，但不能认为远端客户端直接消费 0x0FA3。源码注释说明：若原样下发 0x0FA3，远端会根据角色缓存装备重建糖泡，某些原生 Boss 角色会出现错误。因此研究抓包应同时观察 A 上行 0x0FA3 和 B 下行 0x138B。注意此映射在可靠游戏事件通知路径上可证实；不能据此断言所有 UDP 原始密文都会被服务端重写。
+
+**死亡 0x0FA7 的准确布局**：[game_event.go](../internal/protocol/game/game_event.go) 的 `PlayerDeathEvent`：
+
+```text
+offset  size   field
+0       2      PlayerID
+2       4      ClientTime
+6       2      PosX
+8       2      PosY
+10      1      ItemCount
+11      ...    Items[ItemCount] (由 GameItem 格式编码)
+```
+
+代码还明确提醒：PVE NPC 可以复用 `PlayerID` 字段，因此 0x0FA7 的对象并非必然是真人玩家。`competitive_rule_dispatch.go` 的 `requireMatchArbitrator`、`validateCompetitiveGameOverSource` 进一步提供共享场景生产者/结束消息的来源约束。
+
+**重要边界**：至此证明消息字段与服务端处理，但“爆炸由 A 还是仲裁客户端先计算”“客户端是否本地预测/插值”“重传及最终收敛”尚无客户端动态调用栈证据，保持未确认。
